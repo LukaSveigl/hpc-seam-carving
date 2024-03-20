@@ -53,6 +53,20 @@ size_t index(size_t x, size_t y, int channel, int width, int channels) {
 }
 
 /**
+ * @brief Clamps a value between a minimum and maximum value.
+ * 
+ * @param value The value to clamp.
+ * @param min The minimum value.
+ * @param max The maximum value.
+ * @return size_t The clamped value.
+ */
+size_t clamp(size_t value, size_t min, size_t max) {
+    if (value < min) return min;
+    if (value > max) return max;
+    return value;
+}
+
+/**
  * @brief Computes the Sobel operator on the whole image for a specific color channel. When computing
  * the operator, if a pixel falls outside of the image, the value of the nearest pixel is used.
  * 
@@ -62,29 +76,60 @@ size_t index(size_t x, size_t y, int channel, int width, int channels) {
  */
 uint8_t* sobel(uint8_t* image, Dim dimensions, int channel) {
     uint8_t* energy = new uint8_t[dimensions.width * dimensions.height];
+    
+    int width = dimensions.width;
+    int height = dimensions.height;
+    int channels = dimensions.channels;
+    
     for (int i = 0; i < dimensions.width * dimensions.height; i++) {
         energy[i] = 0;
     }
-    for (int y = 1; y < dimensions.height - 1; y++) {
-        for (int x = 1; x < dimensions.width - 1; x++) {
-            size_t index1 = index(x - 1, y - 1, channel, dimensions.width, dimensions.channels);
-            size_t index2 = index(x, y - 1, channel, dimensions.width, dimensions.channels);
-            size_t index3 = index(x + 1, y - 1, channel, dimensions.width, dimensions.channels);
-            size_t index4 = index(x - 1, y + 1, channel, dimensions.width, dimensions.channels);
-            size_t index5 = index(x, y + 1, channel, dimensions.width, dimensions.channels);
-            size_t index6 = index(x + 1, y + 1, channel, dimensions.width, dimensions.channels);
+    for (int y = 0; y < dimensions.height; y++) {
+        for (int x = 0; x < dimensions.width; x++) {
+
+            // Compute the indices for the Gx part of the Sobel operator.
+            size_t index1 = index(
+                clamp(x - 1, 0, width - 1), clamp(y - 1, 0, height - 1), channel, width, channels
+            );
+            size_t index2 = index(
+                x, clamp(y - 1, 0, height - 1), channel, width, channels
+            );
+            size_t index3 = index(
+                clamp(x + 1, 0, width - 1), clamp(y - 1, 0, height - 1), channel, width, channels
+            );
+            size_t index4 = index(
+                clamp(x - 1, 0, width - 1), y, channel, width, channels
+            );
+            size_t index5 = index(
+                x, y, channel, width, channels
+            );
+            size_t index6 = index(
+                clamp(x + 1, 0, width - 1), y, channel, width, channels
+            );
 
             int Gx = -image[index1] - 2 * image[index2] - image[index3] + image[index4] + 2 * image[index5] + image[index6];
 
-            index1 = index(x - 1, y - 1, channel, dimensions.width, dimensions.channels);
-            index2 = index(x - 1, y, channel, dimensions.width, dimensions.channels);
-            index3 = index(x - 1, y + 1, channel, dimensions.width, dimensions.channels);
-            index4 = index(x + 1, y - 1, channel, dimensions.width, dimensions.channels);
-            index5 = index(x + 1, y, channel, dimensions.width, dimensions.channels);
-            index6 = index(x + 1, y + 1, channel, dimensions.width, dimensions.channels);
+            // Compute the indices for the Gy part of the Sobel operator.
+            index1 = index(
+                clamp(x - 1, 0, width - 1), clamp(y - 1, 0, height - 1), channel, width, channels
+            );
+            index2 = index(
+                clamp(x - 1, 0, width - 1), y, channel, width, channels
+            );
+            index3 = index(
+                clamp(x - 1, 0, width - 1), clamp(y + 1, 0, height - 1), channel, width, channels
+            );
+            index4 = index(
+                clamp(x + 1, 0, width - 1), clamp(y - 1, 0, height - 1), channel, width, channels
+            );
+            index5 = index(
+                clamp(x + 1, 0, width - 1), y, channel, width, channels
+            );
+            index6 = index(
+                clamp(x + 1, 0, width - 1), clamp(y + 1, 0, height - 1), channel, width, channels
+            );
 
             int Gy = image[index1] + 2 * image[index2] + image[index3] - image[index4] - 2 * image[index5] - image[index6];
-            
 
             energy[y * dimensions.width + x] = sqrt(Gx * Gx + Gy * Gy);
         }
@@ -126,21 +171,20 @@ uint8_t* sobel(uint8_t* image, Dim dimensions) {
     return energy;
 }
 
-std::vector<std::vector<size_t>> find_seams(uint8_t* energy, Dim dimensions, uint16_t to_remove) {
+/**
+ * @brief Finds the minimum energy seam in the image. It first computes the dynamic programming table
+ * and then finds the minimum energy seam by selecting the pixel with the lowest energy in the last row.
+ * From there, it backtracks by selecting the index with the minimum value as the next step of the seam.
+ * 
+ * @param energy The energy of the image.
+ * @param dimensions The dimensions of the image.
+ * @return std::vector<size_t> The minimum energy seam.
+ */
+std::vector<size_t> find_seam(uint8_t* energy, Dim dimensions) {
     int width = dimensions.width;
     int height = dimensions.height;
     
-    stbi_write_png((OUTPUT_DIR + "tmp-energy.png").c_str(), width, height, 1, energy, width);
-
-    std::vector<std::vector<size_t>> seams;
-
-    for (int i = 0; i < to_remove; i++) {
-        seams.push_back(std::vector<size_t>());
-    }
-
-    std::cout << "Reinitialized seams\n";
-    
-    uint8_t* dp = new uint8_t[width * height];
+    uint32_t* dp = new uint32_t[width * height];
     
     for (int i = 0; i < width; i++) {
         dp[i] = energy[i];
@@ -170,106 +214,93 @@ std::vector<std::vector<size_t>> find_seams(uint8_t* energy, Dim dimensions, uin
         }
     }
 
-    // Find the n seams with the lowest energy.
-    for (int i = 0; i < to_remove; i++) {
-        std::vector<size_t> seam;
-        int min_index = 0;
-        for (int j = 0; j < width; j++) {
+    std::vector<size_t> seam;
 
-            bool found = false;
-
-            // Check if the begginning of the seam has not been used in a previous seam.
-            for (int k = 0; k < seams.size(); k++) {
-                if (seams[k][0] == j || seams[k][0]) {
-                    found = true;
-                }
-                if (seams[k][0] == min_index) {
-                    min_index++;
-                }
-            }
-
-            if (found) {
-                //std::cout << "Skipping " << j << "\n";
-                continue;
-            }
-
-            //std::cout << "Comparing " << (int)dp[(height - 1) * width + j] << " and " << (int) dp[(height - 1) * width + min_index] << "\n";
-
-            if (dp[(height - 1) * width + j] < dp[(height - 1) * width + min_index]) {
-                min_index = j;
-            }
+    // Find the minimum energy seam by selecting the pixel with the lowest energy in the last row.
+    int min_index = 0;
+    for (int j = 0; j < width; j++) {
+        if (dp[(height - 1) * width + j] < dp[(height - 1) * width + min_index]) {
+            min_index = j;
         }
-        seam.push_back(min_index);
-        
-        for (int y = height - 2; y >= 0; y--) {
-            int x = seam.back();
-            if (x > 0 && dp[y * width + x - 1] < dp[y * width + x]) {
-                x--;
-            }
-            else if (x < width - 1 && dp[y * width + x + 1] < dp[y * width + x]) {
-                x++;
-            }
-            seam.push_back(x);
+    }
+    seam.push_back(min_index);
+    
+    // For all other rows, backtrack by selecting the index with the minimum value as the next step of the seam.
+    for (int y = height - 2; y > 0; y--) {
+        int x_actual = seam.back();
+        int x_center = x_actual;
+        int x_left = x_actual - 1;
+        int x_right = x_actual + 1;
+
+        if (x_left > 0 && dp[(y - 1) * width + x_left] < dp[(y - 1) * width + x_center]) {
+            x_actual = x_left;
+        } else if (x_right < width - 1 && dp[(y - 1) * width + x_right] < dp[(y - 1) * width + x_center]) {
+            x_actual = x_right;
         }
 
-        // Print first 20 elements of a seam.
-        std::cout << "Seam " << i << " before reverse: ";
-        for (int j = 0; j < 20; j++) {
-            std::cout << seam[j] << " ";
-        }
-
-        std::cout << "  ||  ";
-
-        // Print last 20 elements of a seam.
-        for (int j = seam.size() - 20; j < seam.size(); j++) {
-            std::cout << seam[j] << " ";
-        }
-
-        std::cout << "\n";
-
-        std::fflush(stdout);
-
-        std::reverse(seam.begin(), seam.end());
-
-        // Print first 20 elements of a seam.
-        std::cout << "Seam " << i << " after reverse: ";
-        for (int j = 0; j < 20; j++) {
-            std::cout << seam[j] << " ";
-        }
-
-        std::cout << "  ||  ";
-
-        // Print last 20 elements of a seam.
-        for (int j = seam.size() - 20; j < seam.size(); j++) {
-            std::cout << seam[j] << " ";
-        }
-
-        std::cout << "\n\n\n\n";
-        std::fflush(stdout);
-
-        seams[i] = std::vector<size_t>(seam.begin(), seam.end());
+        seam.push_back(x_actual);
     }
 
     delete[] dp;
-
-    return seams;
+    return seam;
 }
 
-void visualize_seams(uint8_t* image, Dim dimensions, std::vector<std::vector<size_t>> seams) {
-    int width = dimensions.width;
+/**
+ * @brief Removes a seam from the image by copying all pixels except the ones in the seam. 
+ * 
+ * @param image The image to remove the seam from.
+ * @param dimensions The dimensions of the image.
+ * @param seam The seam to remove.
+ * @return uint8_t* The new image with the seam removed.
+ */
+uint8_t* remove_seam(uint8_t* image, Dim dimensions, std::vector<size_t> seam) {
+    int new_width = dimensions.width - 1;
     int height = dimensions.height;
     int channels = dimensions.channels;
 
-    for (int i = 0; i < seams.size(); i++) {
-        for (int j = 0; j < seams[i].size(); j++) {
-            size_t ind = index(seams[i][j], height - 1 - j, 0, width, channels);
-            image[ind] = 255;
-            image[ind + 1] = 0;
-            image[ind + 2] = 0;
+    uint8_t* new_image = new uint8_t[new_width * height * channels];
+
+    for (int y = 0; y < height; y++) {
+        int old_index = y * dimensions.width;
+        int new_index = y * new_width;
+
+        // Copy all pixels except the ones in the seam.
+        for (int x = 0; x < dimensions.width; x++) {
+            if (x != seam[y]) {
+                for (int c = 0; c < channels; c++) {
+                    new_image[new_index * channels + c] = image[old_index * channels + c];
+                }
+                new_index++;
+            }
+            old_index++;
         }
     }
 
-    stbi_write_png((OUTPUT_DIR + "seams.png").c_str(), width, height, channels, image, width * channels);
+    delete[] image;
+    return new_image;
+}
+
+/**
+ * @brief Removes a number of seams from the image.
+ * 
+ * @param image The image to remove the seams from.
+ * @param dimensions The dimensions of the image.
+ * @param to_remove The number of seams to remove.
+ * @return uint8_t* The new image with the seams removed.
+ */
+uint8_t* carve_seams(uint8_t* image, Dim dimensions, uint16_t to_remove) {
+    int width = dimensions.width;
+
+    for (int i = 0; i < to_remove; i++) {
+        // Due to the changes in the image, the energy of the image needs to be recomputed.
+        uint8_t* energy = sobel(image, dimensions);
+        std::vector<size_t> seam = find_seam(energy, dimensions);
+        image = remove_seam(image, dimensions, seam);
+        delete[] energy;
+        dimensions.width--;
+    }
+
+    return image;
 }
 
 /**
@@ -288,17 +319,13 @@ int main(int argc, char* argv[]) {
     int width, height, channels;
     uint8_t* image = stbi_load(input_image_path.c_str(), &width, &height, &channels, COLOR_CHANNELS);
 
-    std::cout << "Channels: " << channels << "\n";
-
     check_and_print_error(image != nullptr, "Failed to load image");
 
     uint8_t* energy = sobel(image, {width, height, channels});
-
     stbi_write_png((OUTPUT_DIR + "energy.png").c_str(), width, height, 1, energy, width);
 
-    std::vector<std::vector<size_t>> seams = find_seams(energy, {width, height, channels}, to_remove);
-
-    visualize_seams(image, {width, height, channels}, seams);
+    image = carve_seams(image, {width, height, channels}, to_remove);
+    stbi_write_png(output_image_path.c_str(), width - to_remove, height, channels, image, (width - to_remove) * channels);
 
     delete[] energy;
     delete[] image;

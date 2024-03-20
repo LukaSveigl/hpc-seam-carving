@@ -1,0 +1,10 @@
+# Workspace files
+.vscode/
+
+# Compiled executables
+scarving
+scarving.exe
+pscarving
+pscarving.exe
+*.exe
+*.out
