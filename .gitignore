@@ -8,3 +8,6 @@ pscarving
 pscarving.exe
 *.exe
 *.out
+
+# Samples
+other/

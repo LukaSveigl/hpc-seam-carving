@@ -298,6 +298,8 @@ uint8_t* carve_seams(uint8_t* image, Dim dimensions, uint16_t to_remove) {
         image = remove_seam(image, dimensions, seam);
         delete[] energy;
         dimensions.width--;
+
+        std::cout << "Seam " << i + 1 << " removed\n";
     }
 
     return image;
