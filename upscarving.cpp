@@ -193,7 +193,8 @@ uint8_t* sobel(uint8_t* image, Dim dimensions) {
 
 /**
  * @brief Finds all the seams that need to be removed from the image using the greedy method. This method
- * is not optimal, but it is easier to parallelize.
+ * is not optimal, but it is easier to parallelize. The pixels that have already been visited are marked
+ * with UINT32_MAX.
  * 
  * @param energy The energy of the image.
  * @param dimensions The dimensions of the image.
@@ -240,6 +241,8 @@ std::vector<std::vector<size_t>> find_seams(uint8_t* energy, Dim dimensions, uin
         seams.push_back(std::vector<size_t>());
     }
 
+    // Find the starting point for each seam. This guarantees that the first seam in the seams vector
+    // will be the one with the most optimal seam, the second seam will be the second most optimal seam, and so on.
     for (int i = 0; i < to_remove; i++) {
         int min_index = 0;
         for (int x = 0; x < width; x++) {
@@ -295,23 +298,70 @@ uint8_t* carve_seams(uint8_t* image, Dim dimensions, uint16_t to_remove) {
 
     std::vector<std::vector<size_t>> seams = find_seams(energy, dimensions, to_remove);
 
+    uint16_t new_width = width - to_remove;
+
+    // Remove the seams from the image in parallel.
     #pragma omp parallel for
     for (int y = 0; y < height; y++) {
-        int seam_index = 0;
-        for (int x = 0; x < width; x++) {
-            if (seam_index < seams.size() && seams[seam_index].back() == x) {
-                seam_index++;
-            } else {
+        // Build a vector of pixels in the current row that should not be removed.
+        std::vector<size_t> uncopyable;
+        for (int s = 0; s < seams.size(); s++) {
+            uncopyable.push_back(seams[s][height - 1 - y]);
+        }
+
+        std::sort(uncopyable.begin(), uncopyable.end());
+
+        // Copy the pixels before the first pixel that should not be removed.
+        for (int x = 0; x < uncopyable[0]; x++) {
+            for (int c = 0; c < channels; c++) {
+                new_image[index(x, y, c, new_width, channels)] = image[index(x, y, c, width, channels)];
+            }
+        }
+
+        // Copy the first pixel after the first pixel that should be removed, to prevent the first seam from 
+        // being missed.
+        for (int c = 0; c < channels; c++) {
+            new_image[index(uncopyable[0], y, c, new_width, channels)] = image[index(uncopyable[0] + 1, y, c, width, channels)];
+        }
+
+        // Copy the pixels between the pixels that should not be removed.
+        for (int s = 0; s < uncopyable.size() - 1; s++) {
+            for (int x = uncopyable[s] + 1; x < uncopyable[s + 1]; x++) {
                 for (int c = 0; c < channels; c++) {
-                    new_image[index(x - seam_index, y, c, width - to_remove, channels)] = image[index(x, y, c, width, channels)];
+                    new_image[index(x - s, y, c, new_width, channels)] = image[index(x, y, c, width, channels)];
                 }
             }
         }
     }
 
-
     delete[] energy;
     return new_image;
+}
+
+/**
+ * @brief Visualizes the seams that will be removed from the image.
+ * 
+ * @param image The image to visualize the seams on.
+ * @param dimensions The dimensions of the image.
+ * @param to_remove The number of seams to remove.
+ */
+void visualize_seams(uint8_t* image, Dim dimensions, uint16_t to_remove) {
+    int width = dimensions.width;
+    int height = dimensions.height;
+    int channels = dimensions.channels;
+    uint8_t* energy = sobel(image, dimensions);
+    std::vector<std::vector<size_t>> seams = find_seams(energy, dimensions, to_remove);
+
+    for (int s = 0; s < seams.size(); s++) {
+        for (int y = 0; y < height; y++) {
+            image[index(seams[s][height - 1 - y], y, 0, width, channels)] = 255;
+            image[index(seams[s][height - 1 - y], y, 1, width, channels)] = 0;
+            image[index(seams[s][height - 1 - y], y, 2, width, channels)] = 0;
+        }
+    }
+
+    stbi_write_png((OUTPUT_DIR + "seams.png").c_str(), width, height, channels, image, width * channels);
+    delete[] energy;
 }
 
 /**
@@ -338,6 +388,8 @@ int main(int argc, char* argv[]) {
 
     uint8_t* energy = sobel(image, {width, height, channels});
     stbi_write_png((OUTPUT_DIR + "energy.png").c_str(), width, height, 1, energy, width);
+
+    //visualize_seams(image, {width, height, channels}, to_remove);
 
     image = carve_seams(image, {width, height, channels}, to_remove);
     stbi_write_png(output_image_path.c_str(), width - to_remove, height, channels, image, (width - to_remove) * channels);
