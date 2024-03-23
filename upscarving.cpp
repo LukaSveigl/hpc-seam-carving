@@ -332,6 +332,13 @@ uint8_t* carve_seams(uint8_t* image, Dim dimensions, uint16_t to_remove) {
                 }
             }
         }
+
+        // Copy the pixels after the last pixel that should not be removed.
+        for (int x = uncopyable[uncopyable.size() - 1] + 1; x < width; x++) {
+            for (int c = 0; c < channels; c++) {
+                new_image[index(x - seams.size(), y, c, new_width, channels)] = image[index(x, y, c, width, channels)];
+            }
+        }
     }
 
     delete[] energy;
@@ -389,7 +396,7 @@ int main(int argc, char* argv[]) {
     uint8_t* energy = sobel(image, {width, height, channels});
     stbi_write_png((OUTPUT_DIR + "energy.png").c_str(), width, height, 1, energy, width);
 
-    //visualize_seams(image, {width, height, channels}, to_remove);
+    // visualize_seams(image, {width, height, channels}, to_remove);
 
     image = carve_seams(image, {width, height, channels}, to_remove);
     stbi_write_png(output_image_path.c_str(), width - to_remove, height, channels, image, (width - to_remove) * channels);
